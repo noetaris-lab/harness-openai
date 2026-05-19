@@ -1,0 +1,191 @@
+import type { LLM, Message, Tool, ToolCall, LLMResponse, LLMUsageEvent } from '@noetaris/harness-types'
+import type { ObserverAware, Observer, StepContext } from '@noetaris/harness'
+import OpenAISDK from 'openai'
+
+export interface OpenAIOptions {
+  apiKey?: string
+}
+
+type OpenAIToolCall = {
+  id: string
+  type: 'function'
+  function: {
+    name: string
+    arguments: string
+  }
+}
+
+type OpenAITool = {
+  type: 'function'
+  function: {
+    name: string
+    description: string
+    parameters: Record<string, unknown>
+  }
+}
+
+type OpenAIUserMessage = {
+  role: 'user'
+  content: string
+}
+
+type OpenAIAssistantMessage = {
+  role: 'assistant'
+  content: string | null
+  tool_calls?: OpenAIToolCall[]
+}
+
+type OpenAIToolMessage = {
+  role: 'tool'
+  tool_call_id: string
+  content: string
+}
+
+type OpenAIMessage = OpenAIUserMessage | OpenAIAssistantMessage | OpenAIToolMessage
+
+function translateMessages(messages: Message[]): OpenAIMessage[] {
+  return messages.map((msg): OpenAIMessage => {
+    if (msg.role === 'user') {
+      return { role: 'user', content: msg.content }
+    }
+    if (msg.role === 'assistant') {
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        const toolCalls: OpenAIToolCall[] = msg.toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+        }))
+        const result: OpenAIAssistantMessage = {
+          role: 'assistant',
+          content: msg.content ?? null,
+          tool_calls: toolCalls,
+        }
+        return result
+      }
+      return { role: 'assistant', content: msg.content ?? '' }
+    }
+    // role === 'tool'
+    return { role: 'tool', tool_call_id: msg.toolCallId, content: msg.content }
+  })
+}
+
+function translateTools(tools: Tool[]): OpenAITool[] {
+  return tools.map((t) => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.inputSchema,
+    },
+  }))
+}
+
+function mapFinishReason(finishReason: string): LLMResponse['stopReason'] {
+  if (finishReason === 'stop') return 'end'
+  if (finishReason === 'tool_calls') return 'tool_use'
+  if (finishReason === 'length') return 'max_tokens'
+  return 'end'
+}
+
+function parseToolCallInput(args: string): unknown {
+  try {
+    return JSON.parse(args) as unknown
+  } catch {
+    return args
+  }
+}
+
+function normalizeResponse(response: { choices: Array<{ message: { content: string | null; tool_calls?: OpenAIToolCall[] }; finish_reason: string }>; usage: { prompt_tokens: number; completion_tokens: number } }): LLMResponse {
+  const choice = response.choices[0]
+  if (choice === undefined) {
+    throw new Error('OpenAI response contained no choices')
+  }
+
+  const text = choice.message.content ?? ''
+  const toolCalls: ToolCall[] = (choice.message.tool_calls ?? []).map((tc) => ({
+    id: tc.id,
+    name: tc.function.name,
+    input: parseToolCallInput(tc.function.arguments),
+  }))
+
+  return {
+    text,
+    toolCalls,
+    stopReason: mapFinishReason(choice.finish_reason),
+  }
+}
+
+const ZEROED_STEP_CONTEXT: StepContext = { agentId: '', sessionId: '', stepName: '' }
+
+export class OpenAI implements LLM, ObserverAware {
+  private readonly client: OpenAISDK
+  private readonly model: string
+  private observer: Observer = {}
+  private stepContext: StepContext = ZEROED_STEP_CONTEXT
+
+  constructor(model: string, options?: OpenAIOptions) {
+    this.model = model
+    this.client = new OpenAISDK({ apiKey: options?.apiKey })
+  }
+
+  bindObserver(observer: Observer): void {
+    this.observer = observer
+  }
+
+  setStepContext(ctx: StepContext): void {
+    this.stepContext = ctx
+  }
+
+  async invoke(messages: Message[], options?: { tools?: Tool[] }): Promise<LLMResponse> {
+    const translatedMessages = translateMessages(messages)
+    const tools = options?.tools
+
+    const response = await this.client.chat.completions.create({
+      model: this.model,
+      messages: translatedMessages as OpenAISDK.Chat.Completions.ChatCompletionMessageParam[],
+      ...(tools !== undefined ? { tools: translateTools(tools) as OpenAISDK.Chat.Completions.ChatCompletionTool[] } : {}),
+    })
+
+    if (response.choices.length === 0) {
+      throw new Error('OpenAI response contained no choices')
+    }
+
+    // noUncheckedIndexedAccess: we guard above so this is safe
+    const firstChoice = response.choices[0] as NonNullable<typeof response.choices[0]>
+
+    const rawToolCalls = firstChoice.message.tool_calls
+    const toolCallsForNormalize: OpenAIToolCall[] | undefined = rawToolCalls?.map((tc) => {
+      // as: SDK union type includes ChatCompletionMessageCustomToolCall which omits .function;
+      // all practical tool calls from chat.completions have .function populated
+      const sdkTc = tc as { id: string; function: { name: string; arguments: string } }
+      return {
+        id: sdkTc.id,
+        type: 'function' as const,
+        function: { name: sdkTc.function.name, arguments: sdkTc.function.arguments },
+      }
+    })
+
+    const normalizedResponse = normalizeResponse({
+      choices: [{
+        message: {
+          content: firstChoice.message.content,
+          ...(toolCallsForNormalize !== undefined ? { tool_calls: toolCallsForNormalize } : {}),
+        },
+        finish_reason: firstChoice.finish_reason ?? 'stop',
+      }],
+      usage: {
+        prompt_tokens: response.usage?.prompt_tokens ?? 0,
+        completion_tokens: response.usage?.completion_tokens ?? 0,
+      },
+    })
+
+    const event: LLMUsageEvent = {
+      tokens:     { input: response.usage?.prompt_tokens ?? 0, output: response.usage?.completion_tokens ?? 0 },
+      modelId:    this.model,
+      stopReason: normalizedResponse.stopReason,
+    }
+    this.observer.onEvent?.(this.stepContext, 'llm.response', event)
+
+    return normalizedResponse
+  }
+}

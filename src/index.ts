@@ -1,2 +1,2 @@
-// @noetaris/harness-openai — stub; implementation in F21
-export {}
+export { OpenAI } from './openai.js'
+export { MockOpenAI, MockOpenAIEmptyQueueError } from './mock-openai.js'
