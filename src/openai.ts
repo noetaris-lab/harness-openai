@@ -2,7 +2,9 @@ import type { LLM, Message, Tool, ToolCall, LLMResponse, LLMUsageEvent } from '@
 import type { ObserverAware, Observer, StepContext } from '@noetaris/harness'
 import OpenAISDK from 'openai'
 
+/** Options for {@link OpenAI}. */
 export interface OpenAIOptions {
+  /** OpenAI API key. Defaults to the `OPENAI_API_KEY` environment variable. */
   apiKey?: string
 }
 
@@ -117,12 +119,28 @@ function normalizeResponse(response: { choices: Array<{ message: { content: stri
 
 const ZEROED_STEP_CONTEXT: StepContext = { agentId: '', sessionId: '', stepName: '' }
 
+/**
+ * {@link LLM} adapter for the OpenAI Chat Completions API.
+ *
+ * Implements {@link ObserverAware} — emits an `'llm.response'` event with an
+ * `LLMUsageEvent` payload after each successful invocation.
+ *
+ * @example
+ * ```ts
+ * const llm = new OpenAI('gpt-4o-mini')
+ * const response = await llm.invoke(messages)
+ * ```
+ */
 export class OpenAI implements LLM, ObserverAware {
   private readonly client: OpenAISDK
   private readonly model: string
   private observer: Observer = {}
   private stepContext: StepContext = ZEROED_STEP_CONTEXT
 
+  /**
+   * @param model - OpenAI model ID, e.g. `'gpt-4o-mini'`.
+   * @param options - Optional API key override.
+   */
   constructor(model: string, options?: OpenAIOptions) {
     this.model = model
     this.client = new OpenAISDK({ apiKey: options?.apiKey })

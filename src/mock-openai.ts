@@ -1,6 +1,7 @@
 import type { LLM, Message, Tool, LLMResponse, LLMUsageEvent } from '@noetaris/harness-types'
 import type { ObserverAware, Observer, StepContext } from '@noetaris/harness'
 
+/** Thrown by {@link MockOpenAI} when `invoke` is called with no responses queued. */
 export class MockOpenAIEmptyQueueError extends Error {
   constructor() {
     super('MockOpenAI has no responses configured — call new MockOpenAI(response) or enqueue(response) before invoke')
@@ -10,19 +11,35 @@ export class MockOpenAIEmptyQueueError extends Error {
 
 const ZEROED_STEP_CONTEXT: StepContext = { agentId: '', sessionId: '', stepName: '' }
 
+/**
+ * In-memory test double for {@link OpenAI}.
+ *
+ * Same queue-and-sticky-last behaviour as {@link MockClaude}.
+ * `lastMessages` is populated after each `invoke()` call.
+ *
+ * @example
+ * ```ts
+ * const llm = new MockOpenAI({ text: 'hi', toolCalls: [], stopReason: 'end' })
+ * ```
+ */
 export class MockOpenAI implements LLM, ObserverAware {
+  /** The message list from the most recent `invoke()` call. */
   lastMessages: Message[] = []
 
   private queue: LLMResponse[] = []
   private observer: Observer = {}
   private stepContext: StepContext = ZEROED_STEP_CONTEXT
 
+  /**
+   * @param responses - One or more responses to queue up front.
+   */
   constructor(responses?: LLMResponse | LLMResponse[]) {
     if (responses !== undefined) {
       this.enqueue(responses)
     }
   }
 
+  /** Add one or more responses to the end of the queue. */
   enqueue(response: LLMResponse | LLMResponse[]): void {
     const items = Array.isArray(response) ? response : [response]
     this.queue.push(...items)
