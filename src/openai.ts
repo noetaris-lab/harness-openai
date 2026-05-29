@@ -201,6 +201,7 @@ export class OpenAI implements LLM, ObserverAware {
       tokens:     { input: response.usage?.prompt_tokens ?? 0, output: response.usage?.completion_tokens ?? 0 },
       modelId:    this.model,
       stopReason: normalizedResponse.stopReason,
+      providerName: 'openai',
     }
     this.observer.onEvent?.(this.stepContext, 'llm.response', event)
 

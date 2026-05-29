@@ -301,7 +301,7 @@ describe('OpenAI', () => {
       expect(observer.onEvent).toHaveBeenCalledWith(
         { agentId: 'agent-1', sessionId: 'sess-1', stepName: 'step-1' },
         'llm.response',
-        { tokens: { input: 12, output: 7 }, modelId: 'gpt-4o', stopReason: 'end' },
+        { tokens: { input: 12, output: 7 }, modelId: 'gpt-4o', stopReason: 'end', providerName: 'openai' },
       )
     })
 
