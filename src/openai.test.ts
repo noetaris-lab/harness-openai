@@ -398,6 +398,137 @@ describe('OpenAI', () => {
 
   })
 
+  describe('Group 1b: Generation params — absent params are not forwarded', () => {
+
+    it('omits all generation param keys when constructed with no options', async () => {
+      // arrange
+      const adapter = new OpenAI('gpt-4o-mini')
+
+      // act
+      await adapter.invoke([{ role: 'user', content: 'hello' }])
+
+      // assert
+      const callArg = mockCreate.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(callArg).not.toHaveProperty('temperature')
+      expect(callArg).not.toHaveProperty('max_tokens')
+      expect(callArg).not.toHaveProperty('top_p')
+      expect(callArg).not.toHaveProperty('seed')
+    })
+
+  })
+
+  describe('Group 2b: Generation params — individual and combined params forwarded with correct field names', () => {
+
+    it('forwards temperature when set', async () => {
+      // arrange
+      const adapter = new OpenAI('gpt-4o-mini', { temperature: 0.3 })
+
+      // act
+      await adapter.invoke([{ role: 'user', content: 'hello' }])
+
+      // assert
+      const callArg = mockCreate.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(callArg).toMatchObject({ temperature: 0.3 })
+    })
+
+    it('forwards maxTokens as max_tokens when set', async () => {
+      // arrange
+      const adapter = new OpenAI('gpt-4o-mini', { maxTokens: 512 })
+
+      // act
+      await adapter.invoke([{ role: 'user', content: 'hello' }])
+
+      // assert
+      const callArg = mockCreate.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(callArg).toMatchObject({ max_tokens: 512 })
+      expect(callArg).not.toHaveProperty('maxTokens')
+    })
+
+    it('forwards topP as top_p when set', async () => {
+      // arrange
+      const adapter = new OpenAI('gpt-4o-mini', { topP: 0.8 })
+
+      // act
+      await adapter.invoke([{ role: 'user', content: 'hello' }])
+
+      // assert
+      const callArg = mockCreate.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(callArg).toMatchObject({ top_p: 0.8 })
+      expect(callArg).not.toHaveProperty('topP')
+    })
+
+    it('forwards seed when set', async () => {
+      // arrange
+      const adapter = new OpenAI('gpt-4o-mini', { seed: 42 })
+
+      // act
+      await adapter.invoke([{ role: 'user', content: 'hello' }])
+
+      // assert
+      const callArg = mockCreate.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(callArg).toMatchObject({ seed: 42 })
+    })
+
+    it('forwards all four params when all are set', async () => {
+      // arrange
+      const adapter = new OpenAI('gpt-4o-mini', { temperature: 0.7, maxTokens: 200, topP: 0.95, seed: 99 })
+
+      // act
+      await adapter.invoke([{ role: 'user', content: 'hello' }])
+
+      // assert
+      const callArg = mockCreate.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(callArg).toMatchObject({ temperature: 0.7, max_tokens: 200, top_p: 0.95, seed: 99 })
+    })
+
+  })
+
+  describe('Group 3b: Generation params — explicitly-undefined params are excluded from request', () => {
+
+    it('excludes all generation param keys when all are explicitly undefined', async () => {
+      // arrange
+      const adapter = new OpenAI('gpt-4o-mini', { temperature: undefined, maxTokens: undefined, topP: undefined, seed: undefined })
+
+      // act
+      await adapter.invoke([{ role: 'user', content: 'hello' }])
+
+      // assert
+      const callArg = mockCreate.mock.calls[0]?.[0] as Record<string, unknown>
+      expect(callArg).not.toHaveProperty('temperature')
+      expect(callArg).not.toHaveProperty('max_tokens')
+      expect(callArg).not.toHaveProperty('top_p')
+      expect(callArg).not.toHaveProperty('seed')
+    })
+
+  })
+
+  describe('Group 4b: Generation params — observer event integrity with generation params', () => {
+
+    it('emits llm.response event with correct fields when generation params are set', async () => {
+      // arrange
+      mockCreate.mockResolvedValue({
+        choices: [{ message: { role: 'assistant', content: 'reply', tool_calls: undefined }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        model: 'gpt-4o-mini',
+      })
+      const adapter = new OpenAI('gpt-4o-mini', { temperature: 0.5, maxTokens: 100 })
+      const onEvent = vi.fn()
+      adapter.bindObserver({ onEvent })
+
+      // act
+      await adapter.invoke([{ role: 'user', content: 'hello' }])
+
+      // assert
+      expect(onEvent).toHaveBeenCalledOnce()
+      expect(onEvent).toHaveBeenCalledWith(
+        expect.any(Object),
+        'llm.response',
+        expect.objectContaining({ tokens: { input: 10, output: 5 }, modelId: 'gpt-4o-mini', stopReason: 'end', providerName: 'openai' }),
+      )
+    })
+
+  })
+
   describe('Group 6: Edge cases and repeated calls', () => {
 
     it('passes empty messages array to the SDK without modification', async () => {

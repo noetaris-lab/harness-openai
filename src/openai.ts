@@ -6,6 +6,26 @@ import OpenAISDK from 'openai'
 export interface OpenAIOptions {
   /** OpenAI API key. Defaults to the `OPENAI_API_KEY` environment variable. */
   apiKey?: string
+  /**
+   * Sampling temperature in [0, 2]. Higher values produce more random output.
+   * When absent, the provider default applies.
+   */
+  temperature?: number
+  /**
+   * Maximum number of tokens to generate.
+   * When absent, the provider default applies.
+   */
+  maxTokens?: number
+  /**
+   * Top-p nucleus sampling probability.
+   * When absent, the provider default applies.
+   */
+  topP?: number
+  /**
+   * Random seed for deterministic sampling.
+   * When absent, the provider default applies (non-deterministic).
+   */
+  seed?: number
 }
 
 type OpenAIToolCall = {
@@ -134,15 +154,17 @@ const ZEROED_STEP_CONTEXT: StepContext = { agentId: '', sessionId: '', stepName:
 export class OpenAI implements LLM, ObserverAware {
   private readonly client: OpenAISDK
   private readonly model: string
+  private readonly options?: OpenAIOptions
   private observer: Observer = {}
   private stepContext: StepContext = ZEROED_STEP_CONTEXT
 
   /**
    * @param model - OpenAI model ID, e.g. `'gpt-4o-mini'`.
-   * @param options - Optional API key override.
+   * @param options - Optional configuration including API key and generation params.
    */
   constructor(model: string, options?: OpenAIOptions) {
     this.model = model
+    this.options = options
     this.client = new OpenAISDK({ apiKey: options?.apiKey })
   }
 
@@ -162,6 +184,10 @@ export class OpenAI implements LLM, ObserverAware {
       model: this.model,
       messages: translatedMessages as OpenAISDK.Chat.Completions.ChatCompletionMessageParam[],
       ...(tools !== undefined ? { tools: translateTools(tools) as OpenAISDK.Chat.Completions.ChatCompletionTool[] } : {}),
+      ...(this.options?.temperature !== undefined ? { temperature: this.options.temperature } : {}),
+      ...(this.options?.maxTokens !== undefined ? { max_tokens: this.options.maxTokens } : {}),
+      ...(this.options?.topP !== undefined ? { top_p: this.options.topP } : {}),
+      ...(this.options?.seed !== undefined ? { seed: this.options.seed } : {}),
     })
 
     if (response.choices.length === 0) {
