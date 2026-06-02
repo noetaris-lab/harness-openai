@@ -1,4 +1,4 @@
-import type { LLM, Message, Tool, ToolCall, LLMResponse, LLMUsageEvent } from '@noetaris/harness-types'
+import type { LLM, Message, Tool, ToolCall, LLMResponse, LLMUsageEvent, LLMRequestEvent } from '@noetaris/harness-types'
 import type { ObserverAware, Observer, StepContext } from '@noetaris/harness'
 import OpenAISDK from 'openai'
 
@@ -179,6 +179,9 @@ export class OpenAI implements LLM, ObserverAware {
   async invoke(messages: Message[], options?: { tools?: Tool[] }): Promise<LLMResponse> {
     const translatedMessages = translateMessages(messages)
     const tools = options?.tools
+
+    const requestEvent: LLMRequestEvent = { modelId: this.model, providerName: 'openai' }
+    this.observer.onEvent?.(this.stepContext, 'llm.request', requestEvent)
 
     const response = await this.client.chat.completions.create({
       model: this.model,

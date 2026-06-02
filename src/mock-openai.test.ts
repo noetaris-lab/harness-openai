@@ -134,7 +134,6 @@ describe('MockOpenAI', () => {
       await mock.invoke([])
 
       // assert
-      expect(observer.onEvent).toHaveBeenCalledOnce()
       expect(observer.onEvent).toHaveBeenCalledWith(ctx, 'llm.response', { tokens: { input: 0, output: 0 }, modelId: 'mock', stopReason: 'end', providerName: 'mock' })
     })
 
@@ -215,6 +214,39 @@ describe('MockOpenAI', () => {
 
   })
 
+  describe('Group 8: "llm.request" emission', () => {
+
+    it('emits "llm.request" with modelId: "mock" and providerName: "mock" before dequeue', async () => {
+      // arrange
+      const response: LLMResponse = { text: 'hi', toolCalls: [], stopReason: 'end' }
+      const adapter = new MockOpenAI(response)
+      const mockObserver = { onEvent: vi.fn() }
+      adapter.bindObserver(mockObserver)
+
+      // act
+      await adapter.invoke([])
+
+      // assert
+      expect(mockObserver.onEvent.mock.calls[0]?.[1]).toBe('llm.request')
+      expect(mockObserver.onEvent.mock.calls[0]?.[2]).toEqual({ modelId: 'mock', providerName: 'mock' })
+    })
+
+    it('emits "llm.request" before MockOpenAIEmptyQueueError throw and does not emit "llm.response"', async () => {
+      // arrange
+      const adapter = new MockOpenAI()
+      const mockObserver = { onEvent: vi.fn() }
+      adapter.bindObserver(mockObserver)
+
+      // act
+      await expect(adapter.invoke([])).rejects.toThrow(MockOpenAIEmptyQueueError)
+
+      // assert
+      expect(mockObserver.onEvent).toHaveBeenCalledTimes(1)
+      expect(mockObserver.onEvent.mock.calls[0]?.[1]).toBe('llm.request')
+    })
+
+  })
+
   describe('Group 7: Edge cases', () => {
 
     it('enqueue with a single non-array LLMResponse treats it as a one-element queue', async () => {
@@ -242,7 +274,7 @@ describe('MockOpenAI', () => {
       await mock.invoke([])
 
       // assert
-      expect(obs2.onEvent).toHaveBeenCalledOnce()
+      expect(obs2.onEvent).toHaveBeenCalled()
       expect(obs1.onEvent).not.toHaveBeenCalled()
     })
 

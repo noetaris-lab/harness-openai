@@ -297,7 +297,6 @@ describe('OpenAI', () => {
       await adapter.invoke([{ role: 'user', content: 'hello' }])
 
       // assert
-      expect(observer.onEvent).toHaveBeenCalledOnce()
       expect(observer.onEvent).toHaveBeenCalledWith(
         { agentId: 'agent-1', sessionId: 'sess-1', stepName: 'step-1' },
         'llm.response',
@@ -361,7 +360,7 @@ describe('OpenAI', () => {
 
   describe('Group 5: Error propagation', () => {
 
-    it('propagates OpenAI API error from SDK — onEvent not called', async () => {
+    it('propagates OpenAI API error from SDK — llm.response not emitted', async () => {
       // arrange
       const apiError = new Error('401 Unauthorized')
       mockCreate.mockRejectedValue(apiError)
@@ -371,7 +370,8 @@ describe('OpenAI', () => {
 
       // act / assert
       await expect(adapter.invoke([{ role: 'user', content: 'hi' }])).rejects.toThrow('401 Unauthorized')
-      expect(observer.onEvent).not.toHaveBeenCalled()
+      const eventTypes = observer.onEvent.mock.calls.map((c: unknown[]) => c[1])
+      expect(eventTypes).not.toContain('llm.response')
     })
 
     it('propagates network error from SDK', async () => {
@@ -384,7 +384,7 @@ describe('OpenAI', () => {
       await expect(adapter.invoke([{ role: 'user', content: 'hi' }])).rejects.toThrow('ECONNREFUSED')
     })
 
-    it('throws specific error when choices array is empty — onEvent not called', async () => {
+    it('throws specific error when choices array is empty — llm.response not emitted', async () => {
       // arrange
       mockCreate.mockResolvedValue({ choices: [], usage: { prompt_tokens: 5, completion_tokens: 0 } })
       const adapter = new OpenAI('gpt-4o')
@@ -393,7 +393,8 @@ describe('OpenAI', () => {
 
       // act / assert
       await expect(adapter.invoke([{ role: 'user', content: 'hi' }])).rejects.toThrow('OpenAI response contained no choices')
-      expect(observer.onEvent).not.toHaveBeenCalled()
+      const eventTypes = observer.onEvent.mock.calls.map((c: unknown[]) => c[1])
+      expect(eventTypes).not.toContain('llm.response')
     })
 
   })
@@ -519,12 +520,64 @@ describe('OpenAI', () => {
       await adapter.invoke([{ role: 'user', content: 'hello' }])
 
       // assert
-      expect(onEvent).toHaveBeenCalledOnce()
       expect(onEvent).toHaveBeenCalledWith(
         expect.any(Object),
         'llm.response',
         expect.objectContaining({ tokens: { input: 10, output: 5 }, modelId: 'gpt-4o-mini', stopReason: 'end', providerName: 'openai' }),
       )
+    })
+
+  })
+
+  describe('Group 5: "llm.request" emission', () => {
+
+    it('emits "llm.request" with modelId and providerName before chat.completions.create', async () => {
+      // arrange
+      const mockObserver = { onEvent: vi.fn() }
+      const adapter = new OpenAI('gpt-4o-mini')
+      adapter.bindObserver(mockObserver)
+
+      // act
+      await adapter.invoke([{ role: 'user', content: 'hello' }], { tools: [{ name: 'search', description: 'search', inputSchema: {} }] })
+
+      // assert
+      expect(mockObserver.onEvent.mock.calls[0]?.[1]).toBe('llm.request')
+      expect(mockObserver.onEvent.mock.calls[0]?.[2]).toEqual({ modelId: 'gpt-4o-mini', providerName: 'openai' })
+      expect(mockCreate).toHaveBeenCalledOnce()
+      expect(mockObserver.onEvent.mock.invocationCallOrder[0] ?? 0).toBeLessThan(mockCreate.mock.invocationCallOrder[0] ?? 0)
+    })
+
+    it('emits "llm.request" before "llm.response" on success; no optional content fields', async () => {
+      // arrange
+      const mockObserver = { onEvent: vi.fn() }
+      const adapter = new OpenAI('gpt-4o-mini')
+      adapter.bindObserver(mockObserver)
+
+      // act
+      await adapter.invoke([{ role: 'user', content: 'hi' }])
+
+      // assert
+      expect(mockObserver.onEvent).toHaveBeenCalledTimes(2)
+      expect(mockObserver.onEvent.mock.calls[0]?.[1]).toBe('llm.request')
+      expect(mockObserver.onEvent.mock.calls[1]?.[1]).toBe('llm.response')
+      expect(mockObserver.onEvent.mock.calls[0]?.[2]).not.toHaveProperty('messages')
+      expect(mockObserver.onEvent.mock.calls[0]?.[2]).not.toHaveProperty('tools')
+      expect(mockObserver.onEvent.mock.calls[1]?.[2]).not.toHaveProperty('output')
+    })
+
+    it('emits "llm.request" before SDK throw and does not emit "llm.response" on error', async () => {
+      // arrange
+      mockCreate.mockRejectedValue(new Error('RateLimitError'))
+      const mockObserver = { onEvent: vi.fn() }
+      const adapter = new OpenAI('gpt-4o-mini')
+      adapter.bindObserver(mockObserver)
+
+      // act
+      await expect(adapter.invoke([{ role: 'user', content: 'hi' }])).rejects.toThrow('RateLimitError')
+
+      // assert
+      expect(mockObserver.onEvent).toHaveBeenCalledTimes(1)
+      expect(mockObserver.onEvent.mock.calls[0]?.[1]).toBe('llm.request')
     })
 
   })
@@ -554,7 +607,7 @@ describe('OpenAI', () => {
       await adapter.invoke([{ role: 'user', content: 'hello' }])
 
       // assert
-      expect(secondObserver.onEvent).toHaveBeenCalledOnce()
+      expect(secondObserver.onEvent).toHaveBeenCalled()
       expect(firstObserver.onEvent).not.toHaveBeenCalled()
     })
 
