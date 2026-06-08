@@ -1,6 +1,6 @@
 {
   "name": "@noetaris/harness-openai",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "OpenAI adapter for @noetaris/harness",
   "type": "module",
   "repository": {
@@ -40,6 +40,7 @@
   },
   "peerDependencies": {
     "@noetaris/harness": ">=0.1.0",
+    "@noetaris/harness-openai-models": ">=0.1.0",
     "@noetaris/harness-types": ">=0.1.0"
   },
   "devDependencies": {
