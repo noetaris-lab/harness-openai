@@ -1,6 +1,7 @@
 import type { LLM, Message, Tool, ToolCall, LLMResponse, LLMUsageEvent, LLMRequestEvent } from '@noetaris/harness-types'
 import type { ObserverAware, Observer, StepContext } from '@noetaris/harness'
 import OpenAISDK from 'openai'
+import { getContextWindow } from '@noetaris/harness-openai-models'
 
 /** Options for {@link OpenAI}. */
 export interface OpenAIOptions {
@@ -117,7 +118,7 @@ function parseToolCallInput(args: string): unknown {
   }
 }
 
-function normalizeResponse(response: { choices: Array<{ message: { content: string | null; tool_calls?: OpenAIToolCall[] }; finish_reason: string }>; usage: { prompt_tokens: number; completion_tokens: number } }): LLMResponse {
+function normalizeResponse(response: { choices: Array<{ message: { content: string | null; tool_calls?: OpenAIToolCall[] }; finish_reason: string }>; usage: { prompt_tokens: number; completion_tokens: number } }): Omit<LLMResponse, 'usage'> {
   const choice = response.choices[0]
   if (choice === undefined) {
     throw new Error('OpenAI response contained no choices')
@@ -154,7 +155,7 @@ const ZEROED_STEP_CONTEXT: StepContext = { agentId: '', sessionId: '', stepName:
 export class OpenAI implements LLM, ObserverAware {
   private readonly client: OpenAISDK
   private readonly model: string
-  private readonly options?: OpenAIOptions
+  private readonly options: OpenAIOptions | undefined
   private observer: Observer = {}
   private stepContext: StepContext = ZEROED_STEP_CONTEXT
 
@@ -212,7 +213,7 @@ export class OpenAI implements LLM, ObserverAware {
       }
     })
 
-    const normalizedResponse = normalizeResponse({
+    const normalized = normalizeResponse({
       choices: [{
         message: {
           content: firstChoice.message.content,
@@ -226,14 +227,28 @@ export class OpenAI implements LLM, ObserverAware {
       },
     })
 
+    const contextWindowSize = getContextWindow(this.model)
+    const inputTokens = response.usage?.prompt_tokens ?? 0
+    const outputTokens = response.usage?.completion_tokens ?? 0
+
+    const result: LLMResponse = {
+      ...normalized,
+      usage: {
+        inputTokens,
+        outputTokens,
+        ...(contextWindowSize !== undefined ? { contextWindowSize } : {}),
+      },
+    }
+
     const event: LLMUsageEvent = {
-      tokens:     { input: response.usage?.prompt_tokens ?? 0, output: response.usage?.completion_tokens ?? 0 },
+      tokens:     { input: inputTokens, output: outputTokens },
       modelId:    this.model,
-      stopReason: normalizedResponse.stopReason,
+      stopReason: result.stopReason,
       providerName: 'openai',
+      ...(contextWindowSize !== undefined ? { contextWindowSize } : {}),
     }
     this.observer.onEvent?.(this.stepContext, 'llm.response', event)
 
-    return normalizedResponse
+    return result
   }
 }

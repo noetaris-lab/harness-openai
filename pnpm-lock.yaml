@@ -15,6 +15,9 @@ importers:
       '@noetaris/harness':
         specifier: link:../core
         version: link:../core
+      '@noetaris/harness-openai-models':
+        specifier: link:../openai-models
+        version: link:../openai-models
       '@noetaris/harness-types':
         specifier: link:../types
         version: link:../types

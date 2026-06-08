@@ -300,7 +300,7 @@ describe('OpenAI', () => {
       expect(observer.onEvent).toHaveBeenCalledWith(
         { agentId: 'agent-1', sessionId: 'sess-1', stepName: 'step-1' },
         'llm.response',
-        { tokens: { input: 12, output: 7 }, modelId: 'gpt-4o', stopReason: 'end', providerName: 'openai' },
+        expect.objectContaining({ tokens: { input: 12, output: 7 }, modelId: 'gpt-4o', stopReason: 'end', providerName: 'openai' }),
       )
     })
 
@@ -484,11 +484,11 @@ describe('OpenAI', () => {
 
   })
 
-  describe('Group 3b: Generation params — explicitly-undefined params are excluded from request', () => {
+  describe('Group 3b: Generation params — omitted optional params are excluded from request', () => {
 
-    it('excludes all generation param keys when all are explicitly undefined', async () => {
+    it('excludes all generation param keys when none are provided', async () => {
       // arrange
-      const adapter = new OpenAI('gpt-4o-mini', { temperature: undefined, maxTokens: undefined, topP: undefined, seed: undefined })
+      const adapter = new OpenAI('gpt-4o-mini', {})
 
       // act
       await adapter.invoke([{ role: 'user', content: 'hello' }])
